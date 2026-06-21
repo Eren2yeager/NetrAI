@@ -449,7 +449,7 @@ export default function LandingPage() {
             <span className="text-[14px] text-ink-400">See. Decide. Act.</span>
           </div>
           <p className="text-[14px] text-ink-400 text-center sm:text-right">
-            Built by Team Sanganak · Smart India Hackathon
+            Built by Team Sanganak
           </p>
         </div>
       </footer>
