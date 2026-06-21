@@ -1,0 +1,23 @@
+name: SLA Check
+
+on:
+  schedule:
+    # Runs every hour at :00 (UTC)
+    - cron: '0 * * * *'
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  sla-check:
+    name: Trigger SLA breach check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Call /api/sla/check
+        run: |
+          response=$(curl --silent --show-error --fail \
+            --max-time 30 \
+            --header "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/sla/check")
+          echo "Response: $response"
