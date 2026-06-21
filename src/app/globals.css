@@ -1,26 +1,80 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
+/* ─────────────────────────────────────────────
+   Civic Intelligence System — Design Tokens
+   Primary: #4F46E5 (Governance Indigo)
+   Confirmed via Stitch Call 1 designMd output
+───────────────────────────────────────────── */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Fonts */
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-dm-serif);
+  --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+
+  /* Brand — Governance Indigo */
+  --color-brand-50:  #EEF2FF;
+  --color-brand-100: #E0E7FF;
+  --color-brand-500: #4F46E5;
+  --color-brand-600: #4338CA;
+  --color-brand-700: #3730A3;
+  --color-brand-900: #1E1B4B;
+
+  /* Surface */
+  --color-surface-0:   #FFFFFF;
+  --color-surface-50:  #F8F9FA;
+  --color-surface-100: #F1F3F5;
+  --color-surface-200: #E9ECEF;
+  --color-surface-300: #DEE2E6;
+
+  /* Ink */
+  --color-ink-900: #0F172A;
+  --color-ink-600: #475569;
+  --color-ink-400: #94A3B8;
+
+  /* Status */
+  --color-status-critical: #DC2626;
+  --color-status-warning:  #D97706;
+  --color-status-success:  #16A34A;
+  --color-status-info:     #2563EB;
+
+  /* shadcn/ui semantic mappings → our tokens */
+  --color-background:       var(--color-surface-50);
+  --color-foreground:       var(--color-ink-900);
+  --color-card:             var(--color-surface-0);
+  --color-card-foreground:  var(--color-ink-900);
+  --color-popover:          var(--color-surface-0);
+  --color-popover-foreground: var(--color-ink-900);
+  --color-primary:          var(--color-brand-500);
+  --color-primary-foreground: #FFFFFF;
+  --color-secondary:        var(--color-brand-100);
+  --color-secondary-foreground: var(--color-brand-900);
+  --color-muted:            var(--color-surface-100);
+  --color-muted-foreground: var(--color-ink-600);
+  --color-accent:           var(--color-brand-100);
+  --color-accent-foreground: var(--color-brand-900);
+  --color-destructive:      var(--color-status-critical);
+  --color-border:           var(--color-surface-200);
+  --color-input:            var(--color-surface-200);
+  --color-ring:             var(--color-brand-500);
+
+  /* Radius — 8px base per Stitch Call 1 */
+  --radius: 0.5rem;        /* 8px */
+  --radius-sm: 0.25rem;    /* 4px  — district tag pills */
+  --radius-md: 0.375rem;   /* 6px  — inputs */
+  --radius-lg: 0.5rem;     /* 8px  — buttons */
+  --radius-xl: 0.75rem;    /* 12px — cards */
+  --radius-2xl: 1rem;      /* 16px — modals */
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
 }
