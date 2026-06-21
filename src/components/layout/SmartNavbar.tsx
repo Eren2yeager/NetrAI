@@ -112,7 +112,7 @@ export default function SmartNavbar({ role, userName, onToggleAssistant }: Smart
         
         {/* Left section: Logo + Nav (desktop) */}
         <div className="flex items-center gap-8">
-          <Link href={role === 'cm' ? '/cm/dashboard' : '/dept/dashboard'} className="flex items-center gap-2">
+          <Link href={'/'} className="flex items-center gap-2">
             <AILogo type="netra" size={36} />
             <span
               className="text-2xl text-ink-900 select-none"

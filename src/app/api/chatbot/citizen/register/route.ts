@@ -73,6 +73,10 @@ export async function POST(req: NextRequest) {
     let priorityReason = 'Priority assessed based on category and district.'
     let priority: ComplaintPriority = complaintData.priority ?? 'medium'
 
+    const coordsLine = coordinates?.lat != null && coordinates?.lng != null
+      ? `GPS Coordinates: ${coordinates.lat.toFixed(6)}, ${coordinates.lng.toFixed(6)} (source: ${coordinates.source ?? 'unknown'})`
+      : null
+
     try {
       const aiResult = await geminiJSON<AIPriorityResult>(`
 You are an AI assistant for the Delhi Government complaint system.
@@ -82,9 +86,11 @@ Title: ${title}
 Description: ${description}
 Category: ${category}
 District: ${district}
+${coordsLine ? coordsLine : 'GPS Coordinates: not provided'}
 ${imageUrl ? 'Note: citizen attached a photo of the issue.' : ''}
 
 Scoring: 80–100=critical, 60–79=high, 40–59=medium, 0–39=low.
+Note: Use GPS coordinates (if provided) to refine priority — e.g. proximity to hospitals/schools may increase score.
 
 Respond with JSON only:
 {"score":<number>,"reason":"<one sentence>","priority":"<low|medium|high|critical>"}

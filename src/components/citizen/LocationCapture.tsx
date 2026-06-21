@@ -5,14 +5,10 @@
 // Client component that sits above ComplaintForm on the /submit page.
 // Responsibilities:
 //   1. On mount — silently call navigator.geolocation.getCurrentPosition()
-//   2. If granted   → store coordinates (source: 'gps'), show a small green
-//                     confirmation pill so the citizen knows location is attached
+//   2. If granted   → store coordinates (source: 'gps'), show a green pill
 //   3. If denied / unavailable → show a mini Leaflet pin-drop map (350px tall)
-//                     so the citizen can manually place a pin (source: 'pin')
-//   4. Pass the captured coordinates down to <ComplaintForm> as a prop
-//
-// The GPS request is fire-and-forget — it never blocks form submission.
-// The pin-drop map is only shown when GPS explicitly fails.
+//   4. Pass coordinates + a `requestPinDrop` callback down to <ComplaintForm>
+//      so the form can force the pin-drop open when the AI detects a mismatch
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from 'react'
@@ -20,7 +16,7 @@ import dynamic from 'next/dynamic'
 import { MapPin, CheckCircle2, Loader2 } from 'lucide-react'
 import ComplaintForm, { type ComplaintCoordinates } from './ComplaintForm'
 
-// ── Pin-drop map — dynamically imported (Leaflet needs browser APIs) ───────────
+// ── Pin-drop map — dynamically imported (Leaflet needs browser APIs) ──────────
 
 const PinDropMap = dynamic(() => import('./PinDropMap'), {
   ssr:     false,
@@ -36,17 +32,21 @@ const PinDropMap = dynamic(() => import('./PinDropMap'), {
 type GpsStatus = 'requesting' | 'granted' | 'denied' | 'unavailable'
 
 export default function LocationCapture() {
-  const [gpsStatus,   setGpsStatus]   = useState<GpsStatus>('requesting')
-  const [coordinates, setCoordinates] = useState<ComplaintCoordinates | null>(null)
+  const [gpsStatus,    setGpsStatus]    = useState<GpsStatus>('requesting')
+  const [coordinates,  setCoordinates]  = useState<ComplaintCoordinates | null>(null)
+  // showPinDrop is true when GPS is denied/unavailable OR when the form
+  // requests it because the AI detected a district mismatch
+  const [showPinDrop,  setShowPinDrop]  = useState(false)
   const triedRef = useRef(false)
 
-  // ── Request GPS on mount ────────────────────────────────────────────────────
+  // ── Request GPS on mount ──────────────────────────────────────────────────
   useEffect(() => {
     if (triedRef.current) return
     triedRef.current = true
 
     if (!navigator?.geolocation) {
       setGpsStatus('unavailable')
+      setShowPinDrop(true)
       return
     }
 
@@ -61,18 +61,28 @@ export default function LocationCapture() {
         setGpsStatus('granted')
       },
       () => {
-        // Permission denied or timeout — show pin-drop map
         setGpsStatus('denied')
+        setShowPinDrop(true)
       },
       { timeout: 8000, maximumAge: 60_000 }
     )
   }, [])
 
   // Called by PinDropMap when the citizen clicks to place / move a pin
-  function handlePinDrop(lat: number, lng: number, district?: string) {
+  function handlePinDrop(lat: number, lng: number) {
     setCoordinates({ lat, lng, source: 'pin' })
-    // If the map could identify the district, we surface it in the pill below
-    void district  // used indirectly via coordinates state label in PinDropMap itself
+  }
+
+  // Called by ComplaintForm when AI detects a mismatch — re-opens pin-drop
+  function handleRequestPinDrop() {
+    setShowPinDrop(true)
+    // Scroll the pin-drop map into view smoothly
+    setTimeout(() => {
+      document.getElementById('netraai-pindrop-anchor')?.scrollIntoView({
+        behavior: 'smooth',
+        block:    'center',
+      })
+    }, 100)
   }
 
   return (
@@ -86,8 +96,8 @@ export default function LocationCapture() {
         </div>
       )}
 
-      {/* ── GPS granted — green pill confirmation ── */}
-      {gpsStatus === 'granted' && coordinates && (
+      {/* ── GPS granted + no mismatch request — green pill ── */}
+      {gpsStatus === 'granted' && !showPinDrop && coordinates && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200">
           <CheckCircle2 className="h-3.5 w-3.5 text-status-success shrink-0" aria-hidden="true" />
           <span className="text-xs text-status-success font-medium">
@@ -99,20 +109,28 @@ export default function LocationCapture() {
         </div>
       )}
 
-      {/* ── GPS denied / unavailable — pin-drop map ── */}
-      {(gpsStatus === 'denied' || gpsStatus === 'unavailable') && (
-        <div className="space-y-2">
+      {/* ── Pin-drop map — shown when GPS denied OR mismatch detected ── */}
+      {showPinDrop && (
+        <div id="netraai-pindrop-anchor" className="space-y-2">
           <div className="flex items-center gap-2">
             <MapPin className="h-3.5 w-3.5 text-ink-400 shrink-0" aria-hidden="true" />
             <p className="text-xs text-ink-600">
-              Location access unavailable.{' '}
-              <span className="font-medium text-ink-900">
-                Drop a pin on the map to mark the issue location.
-              </span>
+              {gpsStatus === 'granted'
+                ? <span>
+                    <span className="font-medium text-ink-900">Your GPS location doesn&apos;t match the selected district.</span>{' '}
+                    Drop a pin to confirm the correct location.
+                  </span>
+                : <span>
+                    Location access unavailable.{' '}
+                    <span className="font-medium text-ink-900">
+                      Drop a pin on the map to mark the issue location.
+                    </span>
+                  </span>
+              }
             </p>
           </div>
 
-          <PinDropMap onPinDrop={(lat, lng, district) => handlePinDrop(lat, lng, district)} />
+          <PinDropMap onPinDrop={(lat, lng, district) => handlePinDrop(lat, lng)} />
 
           {coordinates && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-brand-50 border border-brand-200">
@@ -125,8 +143,11 @@ export default function LocationCapture() {
         </div>
       )}
 
-      {/* ── Complaint form — always rendered, coordinates passed as prop ── */}
-      <ComplaintForm coordinates={coordinates} />
+      {/* ── Complaint form — always rendered ── */}
+      <ComplaintForm
+        coordinates={coordinates}
+        onRequestPinDrop={handleRequestPinDrop}
+      />
     </div>
   )
 }

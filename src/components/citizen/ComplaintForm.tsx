@@ -9,7 +9,7 @@
 import { useState } from 'react'
 import {
   Droplets, Zap, Construction, Trash2, Heart, MoreHorizontal,
-  ChevronRight, ChevronLeft, Loader2,
+  ChevronRight, ChevronLeft, Loader2, AlertTriangle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { COMPLAINT_CATEGORIES, DELHI_DISTRICTS } from '@/constants'
@@ -118,13 +118,20 @@ function FormInput({
 interface ComplaintFormProps {
   /** GPS or pin-drop coordinates — captured by parent LocationCapture component */
   coordinates?: ComplaintCoordinates | null
+  /** Called when AI detects a district mismatch — parent opens the pin-drop map */
+  onRequestPinDrop?: () => void
 }
 
-export default function ComplaintForm({ coordinates }: ComplaintFormProps) {
+export default function ComplaintForm({ coordinates, onRequestPinDrop }: ComplaintFormProps) {
   const [step, setStep] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [complaintRef, setComplaintRef] = useState<string | null>(null)
+  // Location mismatch state — set when AI finds coords ≠ selected district
+  const [locationMismatch, setLocationMismatch] = useState<{
+    detectedDistrict: string
+  } | null>(null)
+  const [verifyingLocation, setVerifyingLocation] = useState(false)
 
   const [form, setForm] = useState<ComplaintFormData>({
     category:     'water',
@@ -148,6 +155,52 @@ export default function ComplaintForm({ coordinates }: ComplaintFormProps) {
 
   function step2Valid() {
     return form.district.length > 0
+  }
+
+  // ── Location verification — called before advancing from step 2 ──────────
+  // If coordinates exist, ask the API to check whether they match the district.
+  // On mismatch the parent is asked to open the pin-drop map and the user must
+  // reconfirm before advancing.
+
+  async function verifyAndAdvance() {
+    // Clear any previous mismatch so the banner doesn't linger
+    setLocationMismatch(null)
+
+    // No coords → skip verification, just advance
+    if (!coordinates?.lat || !coordinates?.lng) {
+      setStep((s) => s + 1)
+      return
+    }
+
+    setVerifyingLocation(true)
+    try {
+      const res = await fetch('/api/complaints/verify-location', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          lat:              coordinates.lat,
+          lng:              coordinates.lng,
+          selectedDistrict: form.district,
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        if (!data.match && data.detectedDistrict) {
+          // Mismatch — surface warning and open pin-drop map
+          setLocationMismatch({ detectedDistrict: data.detectedDistrict })
+          onRequestPinDrop?.()
+          return  // stay on step 2
+        }
+      }
+      // Match or API error (fail open) — advance normally
+      setStep((s) => s + 1)
+    } catch {
+      // Network error → fail open, don't block the citizen
+      setStep((s) => s + 1)
+    } finally {
+      setVerifyingLocation(false)
+    }
   }
 
   // ── Submit ──────────────────────────────────────────────────────────────────
@@ -289,6 +342,22 @@ export default function ComplaintForm({ coordinates }: ComplaintFormProps) {
     <div className="space-y-5">
       <h3 className="text-lg font-semibold text-ink-900">Where is the issue?</h3>
 
+      {/* Location mismatch warning — shown when AI detects coords ≠ district */}
+      {locationMismatch && (
+        <div className="flex gap-3 px-4 py-3 rounded-xl bg-amber-50 border border-amber-300">
+          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="text-sm">
+            <p className="font-semibold text-amber-800">Location mismatch detected</p>
+            <p className="text-amber-700 mt-0.5">
+              Your GPS coordinates point to{' '}
+              <span className="font-semibold">{locationMismatch.detectedDistrict}</span>, but you
+              selected <span className="font-semibold">{form.district}</span>. Please drop a pin on
+              the map above to confirm the correct location, or update your district below.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div>
         <label htmlFor="district" className="block text-sm font-medium text-ink-600 mb-1.5">
           District <span className="text-status-critical">*</span>
@@ -296,7 +365,11 @@ export default function ComplaintForm({ coordinates }: ComplaintFormProps) {
         <select
           id="district"
           value={form.district}
-          onChange={(e) => update({ district: e.target.value })}
+          onChange={(e) => {
+            update({ district: e.target.value })
+            // Clear mismatch warning when the user manually changes district
+            setLocationMismatch(null)
+          }}
           required
           className="w-full h-11 px-3 rounded-lg border border-surface-200 bg-surface-0 text-sm text-ink-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition appearance-none"
         >
@@ -376,7 +449,10 @@ export default function ComplaintForm({ coordinates }: ComplaintFormProps) {
         {step > 0 && (
           <button
             type="button"
-            onClick={() => setStep((s) => s - 1)}
+            onClick={() => {
+              setLocationMismatch(null)
+              setStep((s) => s - 1)
+            }}
             className="flex items-center gap-1.5 h-12 px-5 rounded-lg border border-surface-200 text-sm font-medium text-ink-600 hover:bg-surface-50 transition"
           >
             <ChevronLeft className="h-4 w-4" aria-hidden="true" />
@@ -387,12 +463,14 @@ export default function ComplaintForm({ coordinates }: ComplaintFormProps) {
         {step < 2 ? (
           <button
             type="button"
-            onClick={() => setStep((s) => s + 1)}
-            disabled={!canNext}
+            onClick={step === 1 ? verifyAndAdvance : () => setStep((s) => s + 1)}
+            disabled={!canNext || verifyingLocation}
             className="flex-1 flex items-center justify-center gap-1.5 h-12 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Next: {STEPS[step + 1]}
-            <ChevronRight className="h-4 w-4" aria-hidden="true" />
+            {verifyingLocation
+              ? <><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Verifying location…</>
+              : <>{`Next: ${STEPS[step + 1]}`}<ChevronRight className="h-4 w-4" aria-hidden="true" /></>
+            }
           </button>
         ) : (
           <button

@@ -17,6 +17,8 @@ import type { Map as LeafletMap, Marker as LeafletMarker } from 'leaflet'
 
 interface PinDropMapProps {
   onPinDrop: (lat: number, lng: number, district?: string) => void
+  /** Optional extra class on the map container div — use to override height */
+  mapClassName?: string
 }
 
 // Custom brand-coloured pin icon — more visible than the default blue marker
@@ -27,7 +29,7 @@ const PIN_SVG = `
   <circle cx="14" cy="14" r="6" fill="#ffffff"/>
 </svg>`
 
-export default function PinDropMap({ onPinDrop }: PinDropMapProps) {
+export default function PinDropMap({ onPinDrop, mapClassName }: PinDropMapProps) {
   const containerRef  = useRef<HTMLDivElement>(null)
   const mapRef        = useRef<LeafletMap    | null>(null)
   const markerRef     = useRef<LeafletMarker | null>(null)
@@ -194,7 +196,7 @@ export default function PinDropMap({ onPinDrop }: PinDropMapProps) {
       {/* Map container */}
       <div
         ref={containerRef}
-        className="w-full h-[340px] rounded-xl overflow-hidden border border-surface-200"
+        className={`w-full rounded-xl overflow-hidden border border-surface-200 ${mapClassName ?? 'h-[340px]'}`}
         aria-label="Map — click to place a pin at the complaint location"
         role="application"
       />

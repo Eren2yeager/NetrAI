@@ -60,7 +60,7 @@ export default async function DeptDashboardPage() {
   const deptName = dept?.name ?? slug
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
+    <div className="space-y-6 max-w-7xl mx-auto">
 
       {/* Header */}
       <div>

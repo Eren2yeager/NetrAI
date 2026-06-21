@@ -88,6 +88,11 @@ export async function POST(req: NextRequest) {
     let priorityReason = 'Priority assessed based on category and district.'
     let priority: ComplaintPriority = 'medium'
 
+    // Build optional coordinates line for the prompt
+    const coordsLine = coordinates?.lat != null && coordinates?.lng != null
+      ? `- GPS Coordinates: ${coordinates.lat.toFixed(6)}, ${coordinates.lng.toFixed(6)} (source: ${coordinates.source ?? 'unknown'})`
+      : null
+
     try {
       const aiResult = await geminiJSON<AIPriorityResult>(`
 You are an AI assistant for the Delhi Government's complaint management system.
@@ -98,12 +103,16 @@ Complaint details:
 - Description: ${description}
 - Category: ${category}
 - District: ${district}
+${coordsLine ? coordsLine : '- GPS Coordinates: not provided'}
 
 Scoring guide:
 - 80–100 (critical): Life/safety risk, large population affected, infrastructure failure
 - 60–79 (high): Significant disruption, SLA risk, vulnerable citizens affected
 - 40–59 (medium): Notable issue, moderate impact
 - 0–39 (low): Minor inconvenience, small impact
+
+Note: Use the GPS coordinates (if provided) to refine context — e.g. dense urban areas
+or proximity to hospitals/schools may increase priority.
 
 Respond with JSON:
 {

@@ -15,13 +15,25 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import dynamic                                              from 'next/dynamic'
 import ChatMessage,        { type ChatMessageData }    from './ChatMessage'
 import ChatInput                                       from './ChatInput'
 import ComplaintConfirmCard, { type ExtractedComplaint } from './ComplaintConfirmCard'
 import SubmitSuccess                                   from '@/components/citizen/SubmitSuccess'
 import type { AttachmentResult }                       from './ImageAttachment'
 import type { ComplaintCoordinates }                   from '@/components/citizen/ComplaintForm'
-import AILogo, { AILogoType } from '@/components/icons/AILogo'
+import AILogo from '@/components/icons/AILogo'
+import { MapPin, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react'
+
+// ── Lazy-load the pin-drop map (Leaflet needs browser APIs) ──────────────────
+const PinDropMap = dynamic(() => import('@/components/citizen/PinDropMap'), {
+  ssr:     false,
+  loading: () => (
+    <div className="w-full h-[220px] rounded-xl bg-surface-100 flex items-center justify-center">
+      <Loader2 className="h-5 w-5 text-ink-400 animate-spin" aria-hidden="true" />
+    </div>
+  ),
+})
 // ── Language toggle ──────────────────────────────────────────────────────────
 
 const OPENING_MESSAGES: Record<'en' | 'hi', string> = {
@@ -112,6 +124,11 @@ export default function CitizenChatbot() {
   const [complaintRef, setComplaintRef] = useState<string | null>(null)
   const [confirmLoading, setConfirmLoading] = useState(false)
   const [analyzingStep, setAnalyzingStep]   = useState(-1)  // -1 = hidden
+  const [locationMismatch, setLocationMismatch] = useState<{
+    detectedDistrict: string
+  } | null>(null)
+  // Show pin-drop map when GPS denied OR mismatch detected
+  const [showPinDrop, setShowPinDrop] = useState(false)
 
   // ── Opening message on mount ──────────────────────────────────────────────
   useEffect(() => {
@@ -122,7 +139,10 @@ export default function CitizenChatbot() {
 
   // ── Silent GPS capture ────────────────────────────────────────────────────
   useEffect(() => {
-    if (!navigator?.geolocation) return
+    if (!navigator?.geolocation) {
+      setShowPinDrop(true)
+      return
+    }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setCoordinates({
@@ -132,7 +152,10 @@ export default function CitizenChatbot() {
           source:   'gps',
         })
       },
-      () => { /* GPS denied — coordinates stay null, user can still submit */ },
+      () => {
+        // GPS denied — will show pin-drop when complaint is ready
+        setShowPinDrop(true)
+      },
       { timeout: 8000, maximumAge: 60_000 }
     )
   }, [])
@@ -190,9 +213,9 @@ export default function CitizenChatbot() {
         replyMsg,
       ])
 
-      // 4. If complaint data is ready, store it for the confirm card
+      // 4. If complaint data is ready, verify location before showing confirm card
       if (data.complaintReady && data.complaintData) {
-        setExtractedData(data.complaintData)
+        await verifyComplaintLocation(data.complaintData)
       }
     } catch {
       setMessages((prev) => [
@@ -204,6 +227,51 @@ export default function CitizenChatbot() {
       setPendingImage(null)
     }
   }, [isLoading])
+
+  // ── Verify location match between GPS coords and AI-extracted district ──────
+  // Called when the AI returns COMPLAINT_READY.
+  // If coords are available and mismatch → open pin-drop, else show confirm card.
+  const verifyComplaintLocation = useCallback(async (complaint: ExtractedComplaint) => {
+    setExtractedData(complaint)
+
+    // No coords at all → skip verification, go straight to confirm card
+    if (!coordinates?.lat || !coordinates?.lng) {
+      // If we know GPS was denied, pin-drop is already visible — still show card
+      return
+    }
+
+    try {
+      const res = await fetch('/api/complaints/verify-location', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          lat:              coordinates.lat,
+          lng:              coordinates.lng,
+          selectedDistrict: complaint.district,
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        if (!data.match && data.detectedDistrict) {
+          // Mismatch — surface the pin-drop map with a warning message
+          setLocationMismatch({ detectedDistrict: data.detectedDistrict })
+          setShowPinDrop(true)
+          setMessages((prev) => [
+            ...prev,
+            makeMsg(
+              'assistant',
+              `📍 I noticed your GPS location points to **${data.detectedDistrict}**, but you mentioned **${complaint.district}**. Please drop a pin on the map to confirm the correct location before submitting.`
+            ),
+          ])
+          return
+        }
+      }
+      // Match or API error → proceed normally
+    } catch {
+      // Fail open
+    }
+  }, [coordinates])
 
   // ── Handle text send ──────────────────────────────────────────────────────
   const handleSend = useCallback((text: string) => {
@@ -289,6 +357,7 @@ export default function CitizenChatbot() {
   // ── Edit — dismiss confirm card, let user continue chatting ──────────────
   const handleEdit = useCallback(() => {
     setExtractedData(null)
+    setLocationMismatch(null)
     setMessages((prev) => [
       ...prev,
       makeMsg('assistant', 'No problem! What would you like to change? You can describe the correction and I will update the details.'),
@@ -366,20 +435,72 @@ export default function CitizenChatbot() {
         <div ref={chatEndRef} />
       </div>
 
-      {/* ── Complaint confirm card ──────────────────────────────────────── */}
+      {/* ── Location pin-drop + Confirm card — scrollable bottom panel ──── */}
       {extractedData && !complaintRef && (
-        <div className="px-5 pb-3 shrink-0 relative">
-          {/* AI analyzing overlay — shown during registration */}
-          {analyzingStep >= 0 && (
-            <AnalyzingOverlay step={analyzingStep} />
-          )}
-          <ComplaintConfirmCard
-            data={extractedData}
-            imageUrl={pendingImage?.cloudinaryUrl}
-            onConfirm={handleConfirm}
-            onEdit={handleEdit}
-            isLoading={confirmLoading}
-          />
+        <div className="overflow-y-auto shrink-0 max-h-[60%] border-t border-surface-200 bg-white">
+          <div className="px-4 pt-3 pb-1 space-y-2">
+
+            {/* Pin-drop section — only when needed */}
+            {showPinDrop && (
+              <>
+                {/* Mismatch warning banner */}
+                {locationMismatch && (
+                  <div className="flex gap-2.5 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-300">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" aria-hidden="true" />
+                    <p className="text-xs text-amber-800">
+                      <span className="font-semibold">Location mismatch: </span>
+                      Your GPS points to <span className="font-semibold">{locationMismatch.detectedDistrict}</span>.
+                      Drop a pin to confirm the actual issue location.
+                    </p>
+                  </div>
+                )}
+
+                {/* GPS denied — no coords at all */}
+                {!locationMismatch && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-100 border border-surface-200">
+                    <MapPin className="h-3.5 w-3.5 text-ink-400 shrink-0" aria-hidden="true" />
+                    <p className="text-xs text-ink-600">
+                      Drop a pin to attach the exact location to your complaint.
+                    </p>
+                  </div>
+                )}
+
+                {/* Compact map — 200px so confirm card stays reachable */}
+                <PinDropMap
+                  mapClassName="h-[200px]"
+                  onPinDrop={(lat, lng) => {
+                    setCoordinates({ lat, lng, source: 'pin' })
+                    setLocationMismatch(null)
+                  }}
+                />
+
+                {/* Confirmation pill once pin is placed */}
+                {coordinates?.source === 'pin' && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-brand-50 border border-brand-200">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-brand-500 shrink-0" aria-hidden="true" />
+                    <span className="text-xs text-brand-700 font-medium">
+                      Pin placed at {coordinates.lat.toFixed(4)}, {coordinates.lng.toFixed(4)}
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Confirm card */}
+            <div className="relative pb-3">
+              {analyzingStep >= 0 && (
+                <AnalyzingOverlay step={analyzingStep} />
+              )}
+              <ComplaintConfirmCard
+                data={extractedData}
+                imageUrl={pendingImage?.cloudinaryUrl}
+                onConfirm={handleConfirm}
+                onEdit={handleEdit}
+                isLoading={confirmLoading}
+              />
+            </div>
+
+          </div>
         </div>
       )}
 
